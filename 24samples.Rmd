@@ -1,0 +1,337 @@
+---
+title: "Phyloseq_test"
+author: "Simon Rayner"
+date: '2023-08-14'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Phyloseq can handle the qza files output from Qiime2 and they claim to produce superior visualisations. 
+To begin with, let's look at the sample dataset they use to ensure we get the same results.
+
+I started trying to follow this tutorial, but using Bai's Qiime2 files from the 24 samples (8 nasal aspirate/swabs/saliva)
+
+https://rdrr.io/github/jbisanz/qiime2R/f/README.md
+
+
+```{r loadLibraries}
+library(GUniFrac)
+library(vegan)
+
+library(devtools)
+# LDM Requires devtools and "BiocParallel
+# then:
+#   install.packages("/Users/simonray/NetBeansProjects/LDM/LDM_6.0.tar.gz", repos=NULL)
+library(LDM)
+#BiocManager::install("phyloseq")
+library(phyloseq)
+library(tidyverse)
+# devtools::install_github("jbisanz/qiime2R")
+library(qiime2R)
+#library(ggplot2)
+library(reshape2)
+
+# Rsamtools
+```
+
+## Data Import using qiime2R
+
+### set path
+```{r importWithQiime2R_setpath}
+qiime2DataFolder<-"/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples"
+```
+
+### load metadata from Qiime2 file
+```{r importWithQiime2R_metadata}
+metadata<-read_q2metadata(file.path(qiime2DataFolder, "16s_paper_analysis__sample-metadata4R.tsv"))
+```
+
+### load sequence variants
+```{r importWithQiime2R_seqvariants}
+SVTable<-read_qza(file.path(qiime2DataFolder, "3-table.qza"))
+
+```
+This is appears to load correctly because
+```
+> names(SVTable)
+```
+gives us
+```
+ [1] "uuid"       "type"       "format"     "contents"   "version"    "data"       "provenance"
+```
+which is consistent with the name in the example here --> https://rdrr.io/github/jbisanz/qiime2R/f/README.md
+
+Check some more
+
+```{r importWithQiime2R_seqvariants_view}
+SVTable$data[1:5,1:5] #show first 5 samples and first 5 taxa
+```
+
+## Load Taxonomy
+```{r importWithQiime2R_taxonomy}
+taxonomy<-read_qza(file.path(qiime2DataFolder,"4-taxonomy.qza"))
+head(taxonomy$data)
+```
+
+## Load Tree
+#The following throws an error because it is a Phyloseq function, not qiime2R and it expects a Newark tree.
+```{r importWithQiime2R_tree}
+rootedTree<-read_tree(file.path(qiime2DataFolder,"6-rooted-tree.qza"))
+```
+
+but, we can specify the tree if we use the `qza_to_phyloseq`function. 
+
+```
+    cnut<-qza_to_phyloseq(features="/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/3-table.qza",
+      tree="/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/6-rooted-tree.qza",
+      taxonomy="/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/4-taxonomy.qza",
+      metadata="/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/16s_paper_analysis__sample-metadata4R.tsv")
+```
+But, can do the following?
+
+```
+    cnut<-qza_to_phyloseq(features=SVTable,
+      tree="/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/6-rooted-tree.qza",
+      taxonomy=taxonomy,
+      metadata=metadata)
+```
+No, i can't. I get the following error
+```
+Error in file.exists(file) : invalid 'file' argument
+```
+
+So, `qza_to_phyloseq` requires user to specify file paths. 
+
+Go ahead and create a phyloseq object using `qza_to_phyloseq`
+
+```{r createPhyloseqObjectFromFiles}
+    physeqObject<-qza_to_phyloseq(features=file.path(qiime2DataFolder, "3-table.qza"),
+      tree=file.path(qiime2DataFolder, "6-rooted-tree.qza"),
+      taxonomy=file.path(qiime2DataFolder,"4-taxonomy.qza"),
+      metadata=file.path(qiime2DataFolder, "16s_paper_analysis__sample-metadata4R.tsv"))
+```
+
+
+## make a bar plot of the Shannon Diversity by sample
+
+`geom_point`
+`theme_q2r()` 
+`scale_shape_manual`
+`scale_size_continuous`
+`scale_color_discrete`
+
+First, need to load the calculated Shannon values
+
+```{r Shannon}
+shannon<-read_qza(file.path(qiime2DataFolder,"/6-diversity-metrics/shannon_vector.qza")) 
+# make the row names as a column so we can join with the phyloseq object
+shannon<-shannon$data %>% rownames_to_column("SampleID") 
+
+
+gplots::venn(list(metadata=metadata$SampleID, shannon=shannon$SampleID))
+```
+
+
+
+```{r ShannonPlot}
+metadata2<-metadata %>% left_join(shannon)
+metadata2$ss<-factor(metadata2$samplesource)
+ggplot(metadata2, aes(x=ss, y=shannon_entropy)) + geom_boxplot(notch=FALSE) + stat_summary(fun.y=mean, geom="point", shape=23, size=4)  + geom_jitter(shape=16, position=position_jitter(0.2))
+metadata2 %>% 
+  ggplot(metadata2, aes(x=ss, y=shannon_entropy)) + geom_boxplot(notch=FALSE) + stat_summary(fun.y=mean, geom="point", shape=23, size=4)  + geom_jitter(shape=16, position=position_jitter(0.2))
+metadata2 %>%  
+  ggplot(aes(x="samplesource", y=shannon_entropy, fill='ss')) +
+  #stat_summary(geom="bar", fun.data=mean_se, color="black") + #here black is the outline for the bars
+  geom_jitter(shape=21, width=0.2, height=0) +
+  coord_cartesian(ylim=c(2,7)) + # adjust y-axis
+  #facet_grid(~'source') + # create a panel for each body site
+  xlab("ss") +
+  ylab("Shannon Diversity") +
+  geom_boxplot() +
+  #theme_q2r() +
+  scale_fill_manual(values=c("cornflowerblue","indianred", "hotpink4", "magenta4")) + #specify custom colors
+  theme(legend.position="none") #remove the legend as it isn't needed
+  ggsave(file.path(qiime2DataFolder, "6-diversity-metrics/Shannon_by_abx.pdf"), height=3, width=4, device="pdf") # save a PDF 3 inches by 4 inches
+```
+
+
+
+
+
+
+Now try to create a phyloseq object from these
+
+```{r importWithQiime2R4}
+otuR<-otu_table(SVTable$data, taxa_are_rows = TRUE)
+physeq2 = phyloseq(otuR, taxonomy)
+plot_bar(physeq2, fill = "Phylum")
+
+uwunifrac<-read_qza(file.path(qiime2DataFolder, "6-diversity-metrics/unweighted_unifrac_pcoa_results.qza"))
+shannon<-read_qza(file.path(qiime2DataFolder, "6-diversity-metrics/shannon_vector.qza"))$data %>% rownames_to_column("SampleID") 
+```
+
+this imports from a saved dataframe for a sample dataset, but how to load qza
+
+```{r sampleDataset, echo=FALSE}
+
+data ("GlobalPatterns")
+
+# This creates a Phyloseq object
+GP <- prune_taxa(taxa_sums(GlobalPatterns) > 0, GlobalPatterns)
+
+human <- get_variable(GP, "SampleType") %in% c("Feces", "Mock", "Skin", "Tongue")
+
+sample_data(GP)$human <- factor(human)
+
+sample_data(GP)$human<-ifelse(human==TRUE, "Human", "Not-Human")
+
+#create and label human variable
+head(sample_data(GP))
+
+```
+
+## Loading Qiime2 data
+
+
+```{r loadQiime2Data}
+# this loads the data into a list
+SVTable<-read_qza("/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/3-table.qza")
+otuR<-otu_table(SVTable$data, taxa_are_rows = TRUE)
+# This is a large list, not a Phyloseq object
+
+# for loading in R, need to add comment line for line 2 to describe data types for each column
+# For example
+# 
+# sample-id	source
+# #q2:types	Categorical.              <-- R requires this line (must start with #q2:types)
+# 10-30-3A_S20	nasal_aspirate
+# 
+metadata<-read_q2metadata("/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/16s_paper_analysis__sample-metadata4R.tsv")
+rootedTree<-read_tree("/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/6-rooted-tree.qza")
+taxonomy<-read_qza("/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/4-taxonomy.qza")
+
+
+SVTable<-read_qza("/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/3-table.qza")
+otuR<-otu_table(SVTable$data, taxa_are_rows = TRUE)
+physeq2 = phyloseq(otuR, taxonomy)
+plot_bar(physeq2, fill = "Phylum")
+```
+Then build a Phyloseq object using the wrapper function `qza_to_phyloseq()`
+
+```{r qiime2Load}
+
+    cnut<-qza_to_phyloseq(features="/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/3-table.qza", tree="/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/6-rooted-tree.qza", taxonomy="/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/4-taxonomy.qza", metadata="/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/16s_paper_analysis__sample-metadata4R.tsv")
+```
+
+
+
+
+```{r plotCrap}
+uwunifrac$data$Vectors %>%
+  select(SampleID, PC1, PC2) %>%
+  left_join(metadata) %>%
+  left_join(shannon) %>%
+  #ggplot(aes(x=PC1, y=PC2, color=`source`, shape=`reported-antibiotic-usage`, size=shannon)) +
+  ggplot(aes(x=PC1, y=PC2, color='source', size=shannon_entropy)) +
+  geom_point(alpha=0.5) + #alpha controls transparency and helps when points are overlapping
+  theme_q2r() +
+  scale_shape_manual(values=c(16,1), name="source") + 
+  #see http://www.sthda.com/sthda/RDoc/figure/graphs/r-plot-pch-symbols-points-in-r.png 
+  # for numeric shape codes
+  scale_size_continuous(name="Shannon Diversity") +
+  scale_color_discrete(name="source")
+  ggsave(file.path(qiime2DataFolder,"PCoA.pdf"), height=4, width=5, device="pdf") # save a PDF 3 inches by 4 inches
+```
+
+
+## Phyloseq
+
+```{r pressure, echo=FALSE}
+theme_set(theme_classic())
+
+alpha_meas = c("Shannon")
+
+plotGP <- plot_richness(GP, "human", "SampleType", measures=alpha_meas)
+plotGP + geom_boxplot(data=plotGP$data, aes(human,value,color=NULL), alpha=0.1)+coord_cartesian(ylim = c(0, 7))
+```
+
+
+
+## AlphaDiversity
+
+```{r Shannon}
+shannon<-read_qza("/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/6-diversity-metrics/shannon_vector.qza") 
+shannon<-shannon$data %>% rownames_to_column("SampleID") 
+# this moves the sample names to a new column that matches the metadata and allows them to be merged
+
+gplots::venn(list(metadata=metadata$SampleID, shannon=shannon$SampleID))
+```
+
+```{r PCofA}
+library(tidyverse)
+library(qiime2R)
+
+qiime2DataFolder<-"/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples"
+
+
+metadata<-read_q2metadata(file.path(qiime2DataFolder, "16s_paper_analysis__sample-metadata4R.tsv"))
+uwunifrac<-read_qza(file.path(qiime2DataFolder, "6-diversity-metrics/unweighted_unifrac_pcoa_results.qza"))
+shannon<-read_qza(file.path(qiime2DataFolder, "6-diversity-metrics/shannon_vector.qza"))$data %>% rownames_to_column("SampleID") 
+
+uwunifrac$data$Vectors %>%
+  select(SampleID, PC1, PC2) %>%
+  left_join(metadata) %>%
+  left_join(shannon) %>%
+  #ggplot(aes(x=PC1, y=PC2, color=`source`, shape=`reported-antibiotic-usage`, size=shannon)) +
+  ggplot(aes(x=PC1, y=PC2, color='source', size=shannon_entropy)) +
+  geom_point(alpha=0.5) + #alpha controls transparency and helps when points are overlapping
+  theme_q2r() +
+  scale_shape_manual(values=c(16,1), name="source") + 
+  #see http://www.sthda.com/sthda/RDoc/figure/graphs/r-plot-pch-symbols-points-in-r.png 
+  # for numeric shape codes
+  scale_size_continuous(name="Shannon Diversity") +
+  scale_color_discrete(name="source")
+  ggsave(file.path(qiime2DataFolder,"PCoA.pdf"), height=4, width=5, device="pdf") # save a PDF 3 inches by 4 inches
+```
+
+
+Don't have enough variables to generate this plot (no longitudinal informatiom)
+```{r ShannonPlot}
+metadata2<-metadata %>% left_join(shannon)
+metadata2$ss<-factor(metadata2$samplesource)
+metadata2 %>%  
+  ggplot(aes(x="ss", y=shannon_entropy, fill='ss')) +
+  stat_summary(geom="bar", fun.data=mean_se, color="black") + #here black is the outline for the bars
+  geom_jitter(shape=21, width=0.2, height=0) +
+  coord_cartesian(ylim=c(2,7)) + # adjust y-axis
+  #facet_grid(~'source') + # create a panel for each body site
+  xlab("ss") +
+  ylab("Shannon Diversity") +
+  theme_q2r() +
+  scale_fill_manual(values=c("cornflowerblue","indianred", "hotpink4", "magenta4")) + #specify custom colors
+  theme(legend.position="none") #remove the legend as it isn't needed
+  ggsave(file.path(qiime2DataFolder, "6-diversity-metrics/Shannon_by_abx.pdf"), height=3, width=4, device="pdf") # save a PDF 3 inches by 4 inches
+```
+
+
+
+
+```{r f}
+theme_set(theme_classic())
+alpha_meas = c("Shannon")
+
+plotGP <- plot_richness(metadata2, "ss", "ss", measures=alpha_meas)
+
+plot_bar(cnut, fill="Phylum")
+plot_bar(cnut, fill="Phylum") + geom_bar(aes(color=Phylum, fill=Phylum), stat="identity", position="stack")
+cnut@sam_data$samplesource
+cnut_fraction <- merge_samples(cnut, "samplesource")
+  plot_bar(cnut_fraction, fill = "Phylum") + 
+  geom_bar(aes(color=Phylum, fill=Phylum), stat="identity", position="stack")
+
+```
