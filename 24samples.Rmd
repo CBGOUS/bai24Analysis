@@ -92,6 +92,40 @@ but, we can specify the tree if we use the `qza_to_phyloseq`function.
       taxonomy="/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/4-taxonomy.qza",
       metadata="/Users/simonray/DropboxUiO/dropData/ngsdata/run1_24_saliva_nasal_samples/16s_paper_analysis__sample-metadata4R.tsv")
 ```
+## Exploring a `phyloseq` object
+
+I can find the levels by
+```{r explorePhyloSeqObject}
+rank_names(cnut)
+```
+
+Then, i can see where the differences occur by using the `plot_bar` function.
+If i look at the **kingdom** level, i don't see any difference.
+```{r plotSampleContentByKingdom}
+plot_bar(cnut, x="samplesource", fill="Kingdom")
+```
+
+
+But if i drop down to the phylum level, there are notable differences
+```{r plotSampleContentByPhylum}
+plot_bar(cnut, x="samplesource", fill="Phylum")
+```
+
+But, 
+
+1. how can i plot individual samples in order?
+2. how can i get a list of what is present in each sample
+
+```{r plotSampleContentByPhylum2}
+sample_data(cnut)$NewID <- paste(sample_data(cnut)$samplesource, "__", sample_data(cnut)$NewID)
+sample_data(cnut)$NewID2 <- paste(sample_data(cnut)$samplesource, "__", sample_names(cnut), sep="")
+sample_data(cnut)$NewID2 <- factor(sample_data(cnut)$NewID, levels = rev(levels(sample_data(cnut)$NewID)))
+plot_bar(cnut, x="NewID2", fill="Phylum")
+plot_bar(cnut, x="samplesource", fill="Phylum")
+```
+
+
+
 But, can do the following?
 
 ```
@@ -141,7 +175,7 @@ gplots::venn(list(metadata=metadata$SampleID, shannon=shannon$SampleID))
 ```{r ShannonPlot}
 metadata2<-metadata %>% left_join(shannon)
 metadata2$ss<-factor(metadata2$samplesource)
-ggplot(metadata2, aes(x=ss, y=shannon_entropy)) + geom_boxplot(notch=FALSE) + stat_summary(fun.y=mean, geom="point", shape=23, size=4)  + geom_jitter(shape=16, position=position_jitter(0.2))
+ggplot(metadata2, aes(x=ss, y=shannon_entropy, fill = metadata$samplesource)) + geom_boxplot(notch=FALSE) + stat_summary(fun.y=mean, geom="point", shape=23, size=4)  + geom_jitter(shape=16, position=position_jitter(0.2))
 metadata2 %>% 
   ggplot(metadata2, aes(x=ss, y=shannon_entropy)) + geom_boxplot(notch=FALSE) + stat_summary(fun.y=mean, geom="point", shape=23, size=4)  + geom_jitter(shape=16, position=position_jitter(0.2))
 metadata2 %>%  
